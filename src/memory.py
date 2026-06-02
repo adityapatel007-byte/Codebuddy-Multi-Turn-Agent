@@ -34,7 +34,16 @@ class ConversationMemory:
 
     def total_tokens(self) -> int:
         """Count total tokens across all messages."""
-        return sum(self.count_tokens(m["content"]) for m in self.messages)
+        total = 0
+        for m in self.messages:
+            content = m.get("content") or ""
+            total += self.count_tokens(content)
+            # Count tokens in tool call arguments too
+            if "tool_calls" in m:
+                for tc in m["tool_calls"]:
+                    args = tc.get("function", {}).get("arguments", "")
+                    total += self.count_tokens(args)
+        return total
 
     def _trim_if_needed(self) -> None:
         """Remove oldest messages (keeping first user message) if over token limit."""
