@@ -18,8 +18,6 @@ st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden !important;}
-    [data-testid="collapsedControl"] {visibility: visible !important; display: block !important; z-index: 999;}
 
     .cb-header {
         display: flex;
