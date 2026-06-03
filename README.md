@@ -55,9 +55,9 @@ User Input
 │  (src/agent.py — orchestrator)                  │
 │                                                 │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │  Memory   │  │   RAG    │  │   Database   │  │
-│  │ (token    │  │ (chunk → │  │  (SQLite     │  │
-│  │  aware)   │  │  embed → │  │   sessions + │  │
+│  │  Memory  │  │   RAG    │  │   Database    │  │
+│  │ (token   │  │ (chunk → │  │  (SQLite      │  │
+│  │  aware)  │  │  embed → │  │   sessions +  │  │
 │  │          │  │  search) │  │   messages)   │  │
 │  └──────────┘  └──────────┘  └───────────────┘  │
 │                                                 │
