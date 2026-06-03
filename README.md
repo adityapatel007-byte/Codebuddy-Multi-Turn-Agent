@@ -45,27 +45,27 @@ User Input
     │
     ▼
 ┌─────────────────────────────────────────────────┐
-│                  Streamlit UI                    │
+│                  Streamlit UI                   │
 │  (app.py — chat, file upload, session mgmt)     │
 └──────────────────────┬──────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────┐
-│               CodingAgent                        │
-│  (src/agent.py — orchestrator)                   │
-│                                                  │
+│               CodingAgent                       │
+│  (src/agent.py — orchestrator)                  │
+│                                                 │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │  Memory   │  │   RAG    │  │   Database    │  │
-│  │ (token    │  │ (chunk → │  │  (SQLite      │  │
-│  │  aware)   │  │  embed → │  │   sessions +  │  │
+│  │  Memory   │  │   RAG    │  │   Database   │  │
+│  │ (token    │  │ (chunk → │  │  (SQLite     │  │
+│  │  aware)   │  │  embed → │  │   sessions + │  │
 │  │          │  │  search) │  │   messages)   │  │
 │  └──────────┘  └──────────┘  └───────────────┘  │
-│                                                  │
-│  ┌──────────────────────────────────────────┐    │
-│  │            Tool Executor                  │    │
-│  │  run_python()  |  analyze_error()         │    │
-│  │  (subprocess)  |  (traceback parser)      │    │
-│  └──────────────────────────────────────────┘    │
+│                                                 │
+│  ┌──────────────────────────────────────────┐   │
+│  │            Tool Executor                 │   │
+│  │  run_python()  |  analyze_error()        │   │
+│  │  (subprocess)  |  (traceback parser)     │   │
+│  └──────────────────────────────────────────┘   │
 └──────────────────────┬──────────────────────────┘
                        │
                        ▼
