@@ -49,13 +49,6 @@ The following code/documentation was found relevant to the user's question:
 Use this context to provide accurate, specific answers about the user's code.
 """
 
-WELCOME_MESSAGE = """👋 **Welcome to CodeBuddy!**
+WELCOME_MESSAGE = """**Hey, welcome to CodeBuddy.**
 
-I'm your AI coding assistant. I can help you with:
-- **Writing code** — describe what you need and I'll generate it
-- **Running code** — I can execute Python code and show you the output
-- **Debugging** — paste your buggy code and I'll find & fix the issues
-- **Understanding code** — paste any code and I'll explain how it works
-- **Answering from your files** — upload code or docs and ask questions about them
-
-What would you like help with?"""
+I write code, run it, debug it, and answer questions about your files. Drop a prompt below or upload some code to get started."""
