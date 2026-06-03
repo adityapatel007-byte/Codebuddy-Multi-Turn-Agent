@@ -1,6 +1,7 @@
 """
-CodeBuddy — Multi-Turn Coding Assistant
-Streamlit UI with streaming responses, conversation memory, tool execution, and RAG.
+CodeBuddy - Multi-Turn Coding Assistant
+Streamlit UI with streaming responses, conversation memory, tool execution,
+RAG, and persistent chat history.
 """
 
 import streamlit as st
@@ -8,14 +9,12 @@ from src.agent import CodingAgent
 from src.prompts import WELCOME_MESSAGE
 
 
-# --- Page Config ---
 st.set_page_config(
     page_title="CodeBuddy | AI Coding Assistant",
-    page_icon="💻",
+    page_icon="\U0001f4bb",
     layout="centered",
 )
 
-# --- Custom CSS ---
 st.markdown("""
 <style>
     .stChatMessage [data-testid="stMarkdownContainer"] pre {
@@ -23,17 +22,6 @@ st.markdown("""
         border-radius: 8px;
         padding: 12px;
     }
-    .tool-call-box {
-        background-color: #1a1a2e;
-        border-left: 3px solid #4F8BF9;
-        border-radius: 4px;
-        padding: 10px 14px;
-        margin: 8px 0;
-        font-size: 0.85em;
-    }
-    .tool-success { border-left-color: #00c853; }
-    .tool-error { border-left-color: #ff5252; }
-    .tool-timeout { border-left-color: #ffc107; }
     .file-chip {
         display: inline-block;
         background: #2d6a4f;
@@ -46,24 +34,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Title ---
-st.title("💻 CodeBuddy")
-st.caption("Your AI-powered coding assistant — write, debug, run code, and ask about your files")
+st.title("\U0001f4bb CodeBuddy")
+st.caption("Your AI-powered coding assistant")
 
 
-# --- Session State ---
 if "agent" not in st.session_state:
     st.session_state.agent = CodingAgent()
-
-if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": WELCOME_MESSAGE}
     ]
+    st.session_state.indexed_filenames = set()
 
 
-# --- Helper: Render tool calls ---
-def render_tool_calls(tool_calls: list[dict]):
-    """Display tool execution results in the chat."""
+def render_tool_calls(tool_calls):
     for tc in tool_calls:
         name = tc["name"]
         args = tc["arguments"]
@@ -71,11 +54,11 @@ def render_tool_calls(tool_calls: list[dict]):
         status = result.get("status", "unknown")
 
         if status == "success":
-            icon = "✅"
+            icon = "\u2705"
         elif status == "timeout":
-            icon = "⏱️"
+            icon = "\u23f1\ufe0f"
         else:
-            icon = "❌"
+            icon = "\u274c"
 
         if name == "run_python":
             code = args.get("code", "")
@@ -85,7 +68,7 @@ def render_tool_calls(tool_calls: list[dict]):
                 if user_inputs:
                     st.markdown("**User Inputs:**")
                     for i, inp in enumerate(user_inputs, 1):
-                        st.markdown(f"  `input({i})` → `{inp}`")
+                        st.markdown(f"  `input({i})` \u2192 `{inp}`")
                 if result.get("output"):
                     st.markdown("**Output:**")
                     st.code(result["output"], language="text")
@@ -94,7 +77,7 @@ def render_tool_calls(tool_calls: list[dict]):
                     st.code(result["error"], language="text")
 
         elif name == "analyze_error":
-            with st.expander("🔍 Error Analysis", expanded=True):
+            with st.expander("\U0001f50d Error Analysis", expanded=True):
                 if result.get("error_type"):
                     st.markdown(f"**Type:** `{result['error_type']}`")
                 if result.get("error_message"):
@@ -103,21 +86,61 @@ def render_tool_calls(tool_calls: list[dict]):
                     st.markdown(f"**Line:** {result['line_number']}")
 
 
-# --- Sidebar ---
-with st.sidebar:
-    st.header("Settings")
+def load_session_messages(session_id):
+    db_messages = st.session_state.agent.db.get_messages(session_id)
+    st.session_state.messages = [
+        {"role": "assistant", "content": WELCOME_MESSAGE}
+    ]
+    for msg in db_messages:
+        if msg["role"] in ("user", "assistant"):
+            st.session_state.messages.append({
+                "role": msg["role"],
+                "content": msg["content"],
+            })
 
-    if st.button("🗑️ Clear Conversation", use_container_width=True):
-        st.session_state.agent.reset()
+
+with st.sidebar:
+    if st.button("\u2795 New Chat", use_container_width=True, type="primary"):
+        st.session_state.agent.new_session()
         st.session_state.messages = [
             {"role": "assistant", "content": WELCOME_MESSAGE}
         ]
+        st.session_state.indexed_filenames = set()
         st.rerun()
 
-    # --- File Upload (RAG) ---
     st.divider()
-    st.markdown("**📁 Upload Files for Context**")
-    st.caption("Upload code or docs — CodeBuddy will answer based on your files")
+    st.markdown("**\U0001f4ac Chat History**")
+
+    sessions = st.session_state.agent.list_sessions(limit=15)
+    current_session_id = st.session_state.agent.session_id
+
+    if sessions:
+        for session in sessions:
+            sid = session["id"]
+            title = session["title"]
+            is_current = sid == current_session_id
+
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                marker = "\u25b6 " if is_current else ""
+                label = f"{marker}{title}"
+                if st.button(label, key=f"session_{sid}", use_container_width=True,
+                           disabled=is_current):
+                    st.session_state.agent.switch_session(sid)
+                    load_session_messages(sid)
+                    st.session_state.indexed_filenames = set()
+                    st.rerun()
+            with col2:
+                if not is_current:
+                    if st.button("\U0001f5d1", key=f"del_{sid}"):
+                        st.session_state.agent.delete_session(sid)
+                        st.rerun()
+    else:
+        st.caption("No past conversations yet")
+
+    st.divider()
+    st.markdown("**\U0001f4c1 Upload Files for Context**")
+    st.caption("Upload code or docs for RAG")
 
     uploaded_files = st.file_uploader(
         "Drop files here",
@@ -129,46 +152,36 @@ with st.sidebar:
     )
 
     if uploaded_files:
-        # Track which files are already indexed
-        if "indexed_filenames" not in st.session_state:
-            st.session_state.indexed_filenames = set()
-
         new_files = [f for f in uploaded_files if f.name not in st.session_state.indexed_filenames]
-
         if new_files:
             with st.spinner(f"Indexing {len(new_files)} file(s)..."):
                 for f in new_files:
                     content = f.read()
-                    num_chunks = st.session_state.agent.index_file(f.name, content)
+                    st.session_state.agent.index_file(f.name, content)
                     st.session_state.indexed_filenames.add(f.name)
-                    f.seek(0)  # Reset file pointer
-
+                    f.seek(0)
             st.success(f"Indexed {len(new_files)} new file(s)!")
 
-    # Show RAG stats
     rag_stats = st.session_state.agent.get_rag_stats()
     if rag_stats["files_indexed"] > 0:
         st.markdown(f"**Indexed:** {rag_stats['total_chunks']} chunks from {rag_stats['files_indexed']} file(s)")
         for fname in rag_stats["filenames"]:
             st.markdown(f'<span class="file-chip">{fname}</span>', unsafe_allow_html=True)
-
-        if st.button("🗑️ Clear Indexed Files", use_container_width=True):
+        if st.button("\U0001f5d1 Clear Indexed Files", use_container_width=True):
             st.session_state.agent.clear_rag()
             st.session_state.indexed_filenames = set()
             st.rerun()
 
-    # --- Stats ---
     st.divider()
     st.markdown("**Conversation Stats**")
     st.markdown(f"```{st.session_state.agent.get_stats()}```")
 
-    # --- Quick Prompts ---
     st.divider()
     st.markdown("**Quick Prompts**")
     examples = [
-        "Write and run a Python function to check if a number is prime",
+        "Write and run a function to check if a number is prime",
         "Debug this code: def fib(n): return fib(n-1) + fib(n-2)",
-        "Run a Python script that prints the first 10 Fibonacci numbers",
+        "Run a script that prints the first 10 Fibonacci numbers",
     ]
     for example in examples:
         if st.button(example, use_container_width=True):
@@ -176,7 +189,6 @@ with st.sidebar:
             st.rerun()
 
 
-# --- Display Chat History ---
 for msg in st.session_state.messages:
     if msg["role"] == "tool_calls":
         with st.chat_message("assistant"):
@@ -186,7 +198,6 @@ for msg in st.session_state.messages:
             st.markdown(msg["content"])
 
 
-# --- Handle Input ---
 prompt = st.chat_input("Ask me anything about code...")
 
 if "pending_prompt" in st.session_state:
@@ -199,13 +210,10 @@ if prompt:
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("🔧 Thinking..."):
-            tool_calls_data = []
+        with st.spinner("\U0001f527 Thinking..."):
             full_response = ""
-
             for token in st.session_state.agent.chat_stream(prompt):
                 full_response += token
-
             tool_calls_data = st.session_state.agent.get_last_tool_calls()
 
     if tool_calls_data:
@@ -213,6 +221,5 @@ if prompt:
             "role": "tool_calls",
             "content": tool_calls_data,
         })
-
     st.session_state.messages.append({"role": "assistant", "content": full_response})
     st.rerun()
