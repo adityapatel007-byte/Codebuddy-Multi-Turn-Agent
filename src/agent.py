@@ -2,8 +2,8 @@
 Multi-Turn Conversational Agent
 
 Core agent class that handles conversation flow with OpenAI's GPT-4o,
-maintains context across turns, streams responses, and executes tools
-via function calling.
+maintains context across turns, streams responses, executes tools
+via function calling, and retrieves relevant context via RAG.
 """
 
 import json
@@ -12,38 +12,55 @@ from typing import Generator
 
 from src.config import OPENAI_API_KEY, OPENAI_MODEL, MAX_TOKENS
 from src.memory import ConversationMemory
-from src.prompts import SYSTEM_PROMPT
+from src.prompts import SYSTEM_PROMPT, RAG_CONTEXT_TEMPLATE
 from src.tools import TOOL_SCHEMAS, execute_tool
+from src.rag import RAGEngine
 
 
 class CodingAgent:
-    """A multi-turn coding assistant powered by GPT-4o with tool use."""
+    """A multi-turn coding assistant powered by GPT-4o with tool use and RAG."""
 
     def __init__(self):
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.model = OPENAI_MODEL
         self.memory = ConversationMemory(model=self.model)
-        self.last_tool_calls = []  # Track tool calls for UI display
+        self.rag = RAGEngine()
+        self.last_tool_calls = []
+
+    def _build_system_prompt(self, user_message: str) -> str:
+        """
+        Build the system prompt, injecting RAG context if documents are indexed.
+        """
+        prompt = SYSTEM_PROMPT
+
+        if self.rag.has_documents():
+            # Search for relevant chunks
+            results = self.rag.search(user_message)
+            if results:
+                context = self.rag.format_context(results)
+                prompt += RAG_CONTEXT_TEMPLATE.format(context=context)
+
+        return prompt
 
     def chat(self, user_message: str) -> str:
-        """Send a message and get a complete response (with tool use)."""
+        """Send a message and get a complete response (with tool use + RAG)."""
         self.memory.add_message("user", user_message)
         self.last_tool_calls = []
 
+        system_prompt = self._build_system_prompt(user_message)
+
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=self.memory.get_messages(SYSTEM_PROMPT),
+            messages=self.memory.get_messages(system_prompt),
             max_tokens=MAX_TOKENS,
             temperature=0.7,
             tools=TOOL_SCHEMAS,
             tool_choice="auto",
         )
 
-        # Handle the tool calling loop
         message = response.choices[0].message
 
         while message.tool_calls:
-            # Add assistant's tool call message to memory
             self.memory.messages.append({
                 "role": "assistant",
                 "content": message.content,
@@ -60,32 +77,27 @@ class CodingAgent:
                 ],
             })
 
-            # Execute each tool call
             for tool_call in message.tool_calls:
                 func_name = tool_call.function.name
                 func_args = json.loads(tool_call.function.arguments)
 
-                # Execute and get result
                 result = execute_tool(func_name, func_args)
 
-                # Track for UI
                 self.last_tool_calls.append({
                     "name": func_name,
                     "arguments": func_args,
                     "result": json.loads(result),
                 })
 
-                # Add tool result to memory
                 self.memory.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": result,
                 })
 
-            # Call the model again with tool results
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=self.memory.get_messages(SYSTEM_PROMPT),
+                messages=self.memory.get_messages(system_prompt),
                 max_tokens=MAX_TOKENS,
                 temperature=0.7,
                 tools=TOOL_SCHEMAS,
@@ -93,7 +105,6 @@ class CodingAgent:
             )
             message = response.choices[0].message
 
-        # Final text response
         assistant_message = message.content or ""
         self.memory.add_message("assistant", assistant_message)
 
@@ -101,20 +112,17 @@ class CodingAgent:
 
     def chat_stream(self, user_message: str) -> Generator[str, None, None]:
         """
-        Send a message with tool use support + streaming for the final response.
-
-        Flow:
-        1. Call OpenAI (non-streamed) to check if tools are needed
-        2. If tools → execute them, loop back
-        3. Once no more tools → stream the final response
+        Send a message with tool use + RAG support + streaming for the final response.
         """
         self.memory.add_message("user", user_message)
         self.last_tool_calls = []
 
+        system_prompt = self._build_system_prompt(user_message)
+
         # Step 1: Non-streamed call to check for tool use
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=self.memory.get_messages(SYSTEM_PROMPT),
+            messages=self.memory.get_messages(system_prompt),
             max_tokens=MAX_TOKENS,
             temperature=0.7,
             tools=TOOL_SCHEMAS,
@@ -123,7 +131,7 @@ class CodingAgent:
 
         message = response.choices[0].message
 
-        # Step 2: Tool execution loop (non-streamed)
+        # Step 2: Tool execution loop
         while message.tool_calls:
             self.memory.messages.append({
                 "role": "assistant",
@@ -161,7 +169,7 @@ class CodingAgent:
 
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=self.memory.get_messages(SYSTEM_PROMPT),
+                messages=self.memory.get_messages(system_prompt),
                 max_tokens=MAX_TOKENS,
                 temperature=0.7,
                 tools=TOOL_SCHEMAS,
@@ -172,7 +180,7 @@ class CodingAgent:
         # Step 3: Stream the final text response
         stream = self.client.chat.completions.create(
             model=self.model,
-            messages=self.memory.get_messages(SYSTEM_PROMPT),
+            messages=self.memory.get_messages(system_prompt),
             max_tokens=MAX_TOKENS,
             temperature=0.7,
             stream=True,
@@ -187,13 +195,26 @@ class CodingAgent:
 
         self.memory.add_message("assistant", full_response)
 
+    def index_file(self, filename: str, content: bytes) -> int:
+        """Index a file for RAG. Returns number of chunks created."""
+        return self.rag.index_file(filename, content)
+
+    def get_rag_stats(self) -> dict:
+        """Return RAG indexing statistics."""
+        return self.rag.get_stats()
+
+    def clear_rag(self) -> None:
+        """Clear all indexed documents."""
+        self.rag.clear()
+
     def get_last_tool_calls(self) -> list[dict]:
-        """Return tool calls from the last interaction (for UI display)."""
+        """Return tool calls from the last interaction."""
         return self.last_tool_calls
 
     def reset(self) -> None:
-        """Reset the conversation history."""
+        """Reset conversation history and RAG index."""
         self.memory.clear()
+        self.rag.clear()
         self.last_tool_calls = []
 
     def get_stats(self) -> str:

@@ -1,6 +1,6 @@
 """
 CodeBuddy — Multi-Turn Coding Assistant
-Streamlit UI with streaming responses, conversation memory, and tool execution.
+Streamlit UI with streaming responses, conversation memory, tool execution, and RAG.
 """
 
 import streamlit as st
@@ -34,12 +34,21 @@ st.markdown("""
     .tool-success { border-left-color: #00c853; }
     .tool-error { border-left-color: #ff5252; }
     .tool-timeout { border-left-color: #ffc107; }
+    .file-chip {
+        display: inline-block;
+        background: #2d6a4f;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75em;
+        margin: 2px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- Title ---
 st.title("💻 CodeBuddy")
-st.caption("Your AI-powered coding assistant — write, debug, and run code")
+st.caption("Your AI-powered coding assistant — write, debug, run code, and ask about your files")
 
 
 # --- Session State ---
@@ -61,13 +70,12 @@ def render_tool_calls(tool_calls: list[dict]):
         result = tc["result"]
         status = result.get("status", "unknown")
 
-        # Status icon and CSS class
         if status == "success":
-            icon, css_class = "✅", "tool-success"
+            icon = "✅"
         elif status == "timeout":
-            icon, css_class = "⏱️", "tool-timeout"
+            icon = "⏱️"
         else:
-            icon, css_class = "❌", "tool-error"
+            icon = "❌"
 
         if name == "run_python":
             code = args.get("code", "")
@@ -86,7 +94,7 @@ def render_tool_calls(tool_calls: list[dict]):
                     st.code(result["error"], language="text")
 
         elif name == "analyze_error":
-            with st.expander(f"🔍 Error Analysis", expanded=True):
+            with st.expander("🔍 Error Analysis", expanded=True):
                 if result.get("error_type"):
                     st.markdown(f"**Type:** `{result['error_type']}`")
                 if result.get("error_message"):
@@ -106,10 +114,55 @@ with st.sidebar:
         ]
         st.rerun()
 
+    # --- File Upload (RAG) ---
+    st.divider()
+    st.markdown("**📁 Upload Files for Context**")
+    st.caption("Upload code or docs — CodeBuddy will answer based on your files")
+
+    uploaded_files = st.file_uploader(
+        "Drop files here",
+        type=["py", "js", "ts", "jsx", "tsx", "java", "cpp", "c", "go", "rs",
+              "md", "txt", "csv", "json", "yaml", "pdf"],
+        accept_multiple_files=True,
+        key="file_uploader",
+        label_visibility="collapsed",
+    )
+
+    if uploaded_files:
+        # Track which files are already indexed
+        if "indexed_filenames" not in st.session_state:
+            st.session_state.indexed_filenames = set()
+
+        new_files = [f for f in uploaded_files if f.name not in st.session_state.indexed_filenames]
+
+        if new_files:
+            with st.spinner(f"Indexing {len(new_files)} file(s)..."):
+                for f in new_files:
+                    content = f.read()
+                    num_chunks = st.session_state.agent.index_file(f.name, content)
+                    st.session_state.indexed_filenames.add(f.name)
+                    f.seek(0)  # Reset file pointer
+
+            st.success(f"Indexed {len(new_files)} new file(s)!")
+
+    # Show RAG stats
+    rag_stats = st.session_state.agent.get_rag_stats()
+    if rag_stats["files_indexed"] > 0:
+        st.markdown(f"**Indexed:** {rag_stats['total_chunks']} chunks from {rag_stats['files_indexed']} file(s)")
+        for fname in rag_stats["filenames"]:
+            st.markdown(f'<span class="file-chip">{fname}</span>', unsafe_allow_html=True)
+
+        if st.button("🗑️ Clear Indexed Files", use_container_width=True):
+            st.session_state.agent.clear_rag()
+            st.session_state.indexed_filenames = set()
+            st.rerun()
+
+    # --- Stats ---
     st.divider()
     st.markdown("**Conversation Stats**")
     st.markdown(f"```{st.session_state.agent.get_stats()}```")
 
+    # --- Quick Prompts ---
     st.divider()
     st.markdown("**Quick Prompts**")
     examples = [
@@ -126,7 +179,6 @@ with st.sidebar:
 # --- Display Chat History ---
 for msg in st.session_state.messages:
     if msg["role"] == "tool_calls":
-        # Render tool call results
         with st.chat_message("assistant"):
             render_tool_calls(msg["content"])
     else:
@@ -137,37 +189,30 @@ for msg in st.session_state.messages:
 # --- Handle Input ---
 prompt = st.chat_input("Ask me anything about code...")
 
-# Check for pending prompt from sidebar
 if "pending_prompt" in st.session_state:
     prompt = st.session_state.pending_prompt
     del st.session_state.pending_prompt
 
 if prompt:
-    # Display user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Show thinking spinner while tools execute
     with st.chat_message("assistant"):
-        # First, check if tools will be called (show spinner)
-        with st.spinner("🔧 Running tools..."):
+        with st.spinner("🔧 Thinking..."):
             tool_calls_data = []
             full_response = ""
 
             for token in st.session_state.agent.chat_stream(prompt):
                 full_response += token
 
-            # Get tool calls that happened during this interaction
             tool_calls_data = st.session_state.agent.get_last_tool_calls()
 
-    # Store tool calls in message history (if any)
     if tool_calls_data:
         st.session_state.messages.append({
             "role": "tool_calls",
             "content": tool_calls_data,
         })
 
-    # Store assistant response
     st.session_state.messages.append({"role": "assistant", "content": full_response})
     st.rerun()
